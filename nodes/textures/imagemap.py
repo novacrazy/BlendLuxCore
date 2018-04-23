@@ -5,6 +5,7 @@ from ...export.image import ImageExporter
 from ...utils import node as utils_node
 from ... import utils
 from ...utils import ui as utils_ui
+from ...bin import pyluxcore
 
 
 NORMAL_MAP_DESC = (
@@ -159,9 +160,14 @@ class LuxCoreNodeTexImagemap(LuxCoreNodeTexture):
 
         uvscale, uvrotation, uvdelta = self.inputs["2D Mapping"].export(exporter, props)
 
+        from time import time
         definitions = {
             "type": "imagemap",
-            "file": filepath,
+            # "file": filepath,
+            # "blob": list(self.image.pixels),
+            "blob.width": self.image.size[0],
+            "blob.height": self.image.size[1],
+            "blob.channelcount": self.image.channels,
             "wrap": self.wrap,
             # Mapping
             "mapping.type": "uvmapping2d",
@@ -183,7 +189,15 @@ class LuxCoreNodeTexImagemap(LuxCoreNodeTexture):
                 "gain": self.inputs["Brightness"].export(exporter, props),
             })
 
+        s = time()
+        print("setting props", self.image.name)
         luxcore_name = self.create_props(props, definitions, luxcore_name)
+
+        prefix = self.prefix + luxcore_name + "."
+        prop = pyluxcore.Property(prefix + "blob", [])
+        prop.AddAllFloat(list(self.image.pixels))
+        props.Set(prop)
+        print(">>> set props took: %.3f s" % (time() - s))
 
         if self.is_normal_map:
             # Implicitly create a normalmap
