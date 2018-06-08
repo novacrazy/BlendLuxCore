@@ -127,7 +127,7 @@ class Color:
     mat_emission = (0.9, 0.9, 0.9, 1.0)         # Off-white
     mapping_2d = (0.65, 0.55, 0.75, 1.0)        # Slightly Desaturated Purple
     mapping_3d = (0.50, 0.25, 0.60, 1.0)        # Purple
-    property_ = (1, 0.65, 0.0, 1.0)             # Bright Orange
+    property = (1, 0.65, 0.0, 1.0)              # Bright Orange
 
 
 class LuxCoreSocketMaterial(LuxCoreNodeSocket):
@@ -302,7 +302,7 @@ class LuxCoreSocketMapping3D(LuxCoreNodeSocket):
 
 
 class LuxCoreSocketProperty(LuxCoreNodeSocket):
-    color = Color.property_
+    color = Color.property
 
     default_node = "LuxCoreNodeTexPropertyAccess"
 
