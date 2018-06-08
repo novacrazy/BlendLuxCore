@@ -1,204 +1,238 @@
 import bpy
-from bpy.types import PropertyGroup
-from bpy.props import StringProperty, PointerProperty, EnumProperty
+from bpy.types import PropertyGroup, NodeReroute, bpy_struct as Struct
+from bpy.props import StringProperty, PointerProperty, EnumProperty, BoolProperty, IntProperty
 from .. import LuxCoreNodeTexture
 from ...utils import ui as utils_ui
 from ...utils import node as utils_node
+from . objectselect import LuxCoreNodeTexSelectObject, LuxCoreObjectPointers
+
+# Overview
+#
+# Possible outputs:
+#   * Color
+#   * Value (float)
+#   * Object
+#
+# Input:
+#   * Object
+#
+# Parent nodes will always be objects/keyed types
+#
+# If the currently selected property is iterable,
+# slice and index options will be presented.
+
+BLACKLISTED_PROPERTIES = ["owner", "is_frozen", "order", "is_wrapped"]
 
 
-datablock_icons = {
-    'Mesh': "MESH_DATA",
-    'Screen': "SPLITSCREEN",
-    'NodeTree': "NODETREE",
-    'ParticleSettings': "PARTICLE_DATA",
-    'WindowManager': "NONE",
-    'World': "WORLD",
-    'Lattice': "LATTICE_DATA",
-    'Object': "OBJECT_DATA",
-    'Brush': "BRUSH_DATA",
-    'Lamp': "LAMP_DATA",
-    'Armature': "ARMATURE_DATA",
-    'Image': "IMAGE_DATA",
-    'Camera': "CAMERA_DATA",
-    'Curve': "CURVE_DATA",
-    'MetaBall': "META_DATA",
-    'Material': "MATERIAL_DATA",
-    'FreestyleLineStyle': "LINE_DATA",
-    'Scene': "SCENE_DATA",
-    'Speaker': "SPEAKER",
-    'Text': "TEXT",
-    'Texture': "TEXTURE_DATA",
-}
-
-
-def is_iterable(obj):
-    try:
-        iter(obj)
-        return True
-    except TypeError:
-        return False
-
-
-def pad_or_cutoff(_list, length, pad_value=0):
-    if len(_list) < length:
-        return _list + [pad_value] * (length - len(_list))
-    elif len(_list) > length:
-        return _list[:length]
-    else:
-        return _list
-
-
-def get_ID_subclasses():
-    return [cls for cls in bpy.types.ID.__subclasses__()
-            if cls not in {bpy.types.Library, bpy.types.Group, bpy.types.Sound}]
-
-
-class LuxCorePropertyPointers(PropertyGroup):
-    pass
-
-for cls in get_ID_subclasses():
-    setattr(LuxCorePropertyPointers, cls.__name__, PointerProperty(type=cls))
+def proper_case_property(p):
+    """
+    Change snake case to proper case except single-letter words
+    """
+    return ' '.join(
+        [x.capitalize() if len(x) > 1 else x for x in p.split('_')]
+    )
 
 
 class LuxCoreNodeTexPropertyAccess(LuxCoreNodeTexture):
-    bl_label = "PropertyAccess"
-
-    def update_sockets(self, context):
-        self.error = ""
-        use_float_socket = True
-        try:
-            value, tex_type = self.convert_eval_result()
-
-            if tex_type == "constfloat3":
-                use_float_socket = False
-        except Exception as error:
-            self.error = str(error)
-
-        value_output = self.outputs["Value"]
-        color_output = self.outputs["Color"]
-        was_value_enabled = value_output.enabled
-
-        color_output.enabled = not use_float_socket
-        value_output.enabled = use_float_socket
-
-        utils_node.copy_links_after_socket_swap(value_output, color_output, was_value_enabled)
-
-    pointers = PointerProperty(type=LuxCorePropertyPointers)
-    datablock_types = [(cls.__name__, cls.__name__, "", datablock_icons[cls.__name__], i)
-                       for i, cls in enumerate(get_ID_subclasses())]
-    datablock_type = EnumProperty(name="Datablock Type", items=datablock_types, default="Object",
-                                  update=update_sockets)
-    attribute_path = StringProperty(name="Attribute", update=update_sockets)
-    error = StringProperty(name="Error")
+    bl_label = "Property Access"
 
     def init(self, context):
+        self.outputs.new("LuxCoreSocketProperty",
+                         "Object", identifier="Object")
         self.outputs.new("LuxCoreSocketColor", "Color")
-        self.outputs["Color"].enabled = False
         self.outputs.new("LuxCoreSocketFloatUnbounded", "Value")
 
+        self.outputs["Color"].enabled = False
+        self.outputs["Value"].enabled = False
+
+        self.add_input("LuxCoreSocketProperty", "Object")
+
+    # True is the currently selected property is a list
+    selected_is_list = BoolProperty(name="Is List")
+
+    # True is there is a valid parent tree
+    valid_parent = BoolProperty(name="Valid Parent")
+
+    # True is the current selected property is valid
+    valid_selection = BoolProperty(name="Valid Selection")
+
+    parent_name = StringProperty(name="Parent Name")
+    property_name = StringProperty(name="PropertyName")
+
+    def get_properties(self, context):
+        PASSTHROUGH = [("Passthrough", "Passthrough", "")]
+
+        (_, parent_object, _) = self.resolve(read_only=True)
+
+        def valid_key(key):
+            if key.startswith("__") or key in BLACKLISTED_PROPERTIES:
+                return False
+            else:
+                child_object = getattr(parent_object, key)
+
+                if child_object is None:
+                    return False
+                elif callable(child_object) and not isinstance(child_object, Struct):
+                    return False
+                elif isinstance(child_object, str):
+                    return False
+
+            return True
+
+        if parent_object is not None:
+            valid_dir = filter(valid_key, dir(parent_object))
+
+            return list(map(lambda p: (p, proper_case_property(p), ""), valid_dir)) + PASSTHROUGH
+        else:
+            return PASSTHROUGH
+
+    selected_property = StringProperty(name="Selected Property")
+
+    def on_select_property(self, context):
+        self.selected_property = self.properties
+
+        self.property_name = proper_case_property(self.selected_property)
+
+    properties = EnumProperty(
+        name="Properties",
+        items=get_properties,
+        update=on_select_property)
+
+    list_elements = IntProperty(name="List Elements")
+    slice_list = BoolProperty(name="Slice List")
+    slice_first = IntProperty(name="First Index", min=0)
+    slice_last = IntProperty(name="Last Index", min=0)
+
+    def update_sockets(self):
+        pass
+        # if not self.valid_parent or not self.valid_selection:
+        #     for output in self.outputs:
+        #         output.enabled = False
+        # else:
+        #     pass
+
+    def resolve(self, read_only=False):
+        """
+        Recursively resolves properties from chained objects and selectors
+
+        Returns (valid parent tree, parent object, selected child object)
+        """
+        INVALID = (False, None, None)
+
+        input = self.inputs.get("Object")
+
+        if input is None:
+            return INVALID
+
+        links = input.links
+
+        if len(links) == 1:
+            parent_node = links[0].from_node
+
+            # resolve reroutes
+            while isinstance(parent_node, NodeReroute):
+                reroute_input = parent_node.inputs.get("Input")
+
+                if reroute_input is None:
+                    return INVALID
+                else:
+                    reroute_links = reroute_input.links
+
+                    if len(reroute_links) > 0:
+                        parent_node = reroute_links[0].from_node
+
+            valid_parent = False
+            parent_object = None
+
+            if isinstance(parent_node, LuxCoreNodeTexSelectObject):
+                valid_parent = True
+
+                parent_object = getattr(
+                    parent_node.pointers,
+                    parent_node.datablock_type)
+
+                if not read_only:
+                    self.parent_name = parent_object.name
+
+            elif isinstance(parent_node, LuxCoreNodeTexPropertyAccess):
+                (valid_parent, _, parent_object) = parent_node.resolve(read_only)
+
+                if not read_only:
+                    self.parent_name = parent_node.property_name
+
+            if valid_parent:
+                child_object = None
+                iterable = False
+
+                if parent_object is not None and self.selected_property:
+                    if self.selected_property == "Passthrough":
+                        child_object = parent_object
+                    elif hasattr(parent_object, self.selected_property):
+                        child_object = getattr(
+                            parent_object, self.selected_property)
+
+                    iterable = \
+                        isinstance(child_object, slice) or  \
+                        isinstance(child_object, list) or   \
+                        hasattr(child_object, "__getitem__")
+
+                    if not iterable and not isinstance(child_object, Struct):
+                        try:
+                            iter(child_object)
+                            iterable = True
+                        except TypeError:
+                            pass
+
+                    if iterable:
+                        if not read_only:
+                            self.list_elements = len(child_object)
+
+                        try:
+                            if self.slice_list:
+                                child_object = child_object[self.slice_first:self.slice_last]
+                            else:
+                                child_object = child_object[self.slice_first]
+                        except IndexError:
+                            # Invalid slice/index, so there is no child
+                            child_object = None
+
+                    if not read_only:
+                        self.selected_is_list = iterable
+
+                        self.valid_selection = child_object is not None
+
+                    return (valid_parent, parent_object, child_object)
+
+        return INVALID
+
+    def socket_value_update(self, context):
+        (self.valid_parent, _, _) = self.resolve()
+
+    def update(self):
+        (self.valid_parent, _, _) = self.resolve()
+
     def draw_label(self):
-        datablock = self.get_selected_datablock()
-        if datablock and self.attribute_path:
-            return datablock.name + "." + self.attribute_path
+        if self.valid_parent:
+            return "Accessing {} from {}".format(self.property_name, self.parent_name)
         else:
             return self.bl_label
 
     def draw_buttons(self, context, layout):
-        layout.prop(self, "datablock_type")
-        layout.prop(self.pointers, self.datablock_type)
-        layout.prop(self, "attribute_path")
-        if self.error:
-            row = layout.row()
-            row.label(self.error, icon="CANCEL")
-            op = row.operator("luxcore.copy_error_to_clipboard", icon="COPYDOWN")
-            op.message = self.error
+        if self.valid_parent:
+            layout.prop(self, "properties", text="Property")
 
-    @staticmethod
-    def parse_indices(index_str):
-        indices = [int(s) for s in index_str.split(":")]
-        len_indices = len(indices)
+            if self.valid_selection:
+                if self.selected_is_list:
+                    layout.prop(self, "slice_list", text="Slice List?")
 
-        if len_indices == 0:
-            raise IndexError("No index given")
-        elif len_indices == 1:
-            start, end, step = indices[0], indices[0] + 1, 1
-        elif len_indices == 2:
-            start, end, step = indices[0], indices[1], 1
-        elif len_indices == 3:
-            start, end, step = indices
-        else:
-            raise IndexError("Too many indices (only start, end, step allowed)")
-        return start, end, step, len_indices
+                    if self.slice_list:
+                        row = layout.row()
 
-    def get_selected_datablock(self):
-        return getattr(self.pointers, self.datablock_type)
-
-    def eval(self):
-        datablock = self.get_selected_datablock()
-
-        if datablock and self.attribute_path:
-            value = datablock
-            # Follow the chain of attributes
-            for attrib in self.attribute_path.split("."):
-                if "[" in attrib:
-                    # Indexed access of an iterable
-                    iter_attrib, index_str = attrib.split("[")
-                    index_str = index_str.replace("]", "")
-                    start, end, step, len_indices = self.parse_indices(index_str)
-
-                    iterable = getattr(value, iter_attrib)
-                    if not is_iterable(iterable):
-                        raise TypeError(iter_attrib + " is not iterable")
-
-                    if len_indices == 1:
-                        # Some iterables in Blender don't have slicing support,
-                        # so we don't use it if we don't have to
-                        value = iterable[start]
+                        row.prop(self, "slice_first", text="First")
+                        row.prop(self, "slice_last", text="Last")
                     else:
-                        value = iterable[start:end:step]
-                else:
-                    value = getattr(value, attrib)
-            return value
-        return 0
-
-    def convert_eval_result(self):
-        value = self.eval()
-
-        try:
-            # Check if it is iterable (Color, Vector etc.)
-            as_list = pad_or_cutoff(list(value), length=3)
-            return as_list, "constfloat3"
-        except TypeError:
-            # Not iterable
-            return value, "constfloat1"
-
-    def sub_export(self, exporter, props, luxcore_name=None):
-        self.error = ""
-        utils_ui.tag_region_for_redraw(bpy.context, "NODE_EDITOR", "WINDOW")
-
-        value = None
-        try:
-            value, tex_type = self.convert_eval_result()
-            definitions = {
-                "type": tex_type,
-                "value": value,
-            }
-
-            return self.create_props(props, definitions, luxcore_name)
-        except Exception as error:
-            print("Error during evaluation of", self.bl_label, "node in tree", self.id_data)
-            if value:
-                print("The evaluation result was:", value)
-            import traceback
-            traceback.print_exc()
-
-            self.error = str(error)
-            utils_ui.tag_region_for_redraw(bpy.context, "NODE_EDITOR", "WINDOW")
-
-            definitions = {
-                "type": "constfloat1",
-                "value": 0,
-            }
-
-            return self.create_props(props, definitions, luxcore_name)
-
+                        layout.prop(self, "slice_first", text="Index")
+            else:
+                layout.label("Invalid Selection!", icon="CANCEL")
+        else:
+            layout.label("Invalid Input!", icon="CANCEL")
