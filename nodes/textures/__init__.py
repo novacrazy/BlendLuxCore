@@ -41,6 +41,7 @@ from .mapping3d import LuxCoreNodeTexMapping3D
 from .marble import LuxCoreNodeTexMarble
 from .math import LuxCoreNodeTexMath
 from .normalmap import LuxCoreNodeTexNormalmap
+from .objectselect import LuxCoreNodeTexSelectObject
 from .output import LuxCoreNodeTexOutput
 from .pointiness import LuxCoreNodeTexPointiness
 from .propertyaccess import LuxCoreNodeTexPropertyAccess
@@ -137,6 +138,7 @@ luxcore_node_categories_texture = [
         NodeItem("LuxCoreNodeTexUV", label="UV Test"),
         NodeItem("LuxCoreNodeTexIORPreset", label="IOR Preset"),
         NodeItem("LuxCoreNodeTexPropertyAccess", label="Property Access"),
+        NodeItem("LuxCoreNodeTexSelectObject", label="Select Object"),
     ]),
 
     LuxCoreNodeCategoryTexture("LUXCORE_TEXTURE_MAPPING", "Mapping", items=[
