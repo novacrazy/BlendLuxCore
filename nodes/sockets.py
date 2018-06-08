@@ -45,14 +45,20 @@ class LuxCoreNodeSocket(NodeSocket):
                 layout.label("Wrong Input!", icon="CANCEL")
                 return
 
-        has_default = hasattr(self, "default_value") and self.default_value is not None
+        has_default = \
+            hasattr(self, "default_value") and \
+            self.default_value is not None
 
         if self.is_output or self.is_linked or not has_default:
             layout.label(text)
 
             # Show a button that lets the user add a node for this socket instantly.
             # Sockets that only accept one node (e.g. volume, emission, fresnel) should have a default_node member
-            show_operator = not self.is_output and not self.is_linked and hasattr(self, "default_node")
+            show_operator = \
+                not self.is_output and \
+                not self.is_linked and \
+                hasattr(self, "default_node")
+
             # Don't show for volume sockets on volume output
             is_vol_socket_on_vol_output = self.bl_idname == "LuxCoreSocketVolume" and node.bl_idname == "LuxCoreNodeVolOutput"
 
@@ -113,14 +119,15 @@ class LuxCoreNodeSocket(NodeSocket):
 
 
 class Color:
-    material = (0.39, 0.78, 0.39, 1.0)
-    color_texture = (0.78, 0.78, 0.16, 1.0)
-    float_texture = (0.63, 0.63, 0.63, 1.0)
-    fresnel_texture = (0.33, 0.6, 0.85, 1.0)
-    volume = (1.0, 0.4, 0.216, 1.0)
-    mat_emission = (0.9, 0.9, 0.9, 1.0)
-    mapping_2d = (0.65, 0.55, 0.75, 1.0)
-    mapping_3d = (0.50, 0.25, 0.60, 1.0)
+    material = (0.39, 0.78, 0.39, 1.0)          # Light yellow-green
+    color_texture = (0.78, 0.78, 0.16, 1.0)     # Brownish Orange
+    float_texture = (0.63, 0.63, 0.63, 1.0)     # Grey
+    fresnel_texture = (0.33, 0.6, 0.85, 1.0)    # Sky Blue
+    volume = (1.0, 0.4, 0.216, 1.0)             # Orange-ish Red
+    mat_emission = (0.9, 0.9, 0.9, 1.0)         # Off-white
+    mapping_2d = (0.65, 0.55, 0.75, 1.0)        # Slightly Desaturated Purple
+    mapping_3d = (0.50, 0.25, 0.60, 1.0)        # Purple
+    property_ = (1, 0.65, 0.0, 1.0)             # Bright Orange
 
 
 class LuxCoreSocketMaterial(LuxCoreNodeSocket):
@@ -204,12 +211,20 @@ class LuxCoreSocketFloatPositive(LuxCoreSocketFloat):
 
 
 class LuxCoreSocketFloat0to1(LuxCoreSocketFloat):
-    default_value = FloatProperty(min=0, max=1, description="Float value between 0 and 1")
+    default_value = FloatProperty(
+        min=0,
+        max=1,
+        description="Float value between 0 and 1"
+    )
     slider = True
 
 
 class LuxCoreSocketFloat0to2(LuxCoreSocketFloat):
-    default_value = FloatProperty(min=0, max=2, description="Float value between 0 and 2")
+    default_value = FloatProperty(
+        min=0,
+        max=2,
+        description="Float value between 0 and 2"
+    )
     slider = True
 
 
@@ -286,15 +301,30 @@ class LuxCoreSocketMapping3D(LuxCoreNodeSocket):
         return mapping_type, transformation
 
 
+class LuxCoreSocketProperty(LuxCoreNodeSocket):
+    color = Color.property_
+
+    default_node = "LuxCoreNodeTexPropertyAccess"
+
+
 # Specify the allowed inputs of sockets. Subclasses inherit the settings of their parents.
 # We have to do this here because some sockets (e.g. Material) need to refer to their own class.
 LuxCoreSocketMaterial.allowed_inputs = {LuxCoreSocketMaterial}
 LuxCoreSocketVolume.allowed_inputs = {LuxCoreSocketVolume}
 LuxCoreSocketFresnel.allowed_inputs = {LuxCoreSocketFresnel}
 LuxCoreSocketMatEmission.allowed_inputs = {LuxCoreSocketMatEmission}
-LuxCoreSocketBump.allowed_inputs = {LuxCoreSocketBump, LuxCoreSocketColor, LuxCoreSocketFloat}
+LuxCoreSocketBump.allowed_inputs = {
+    LuxCoreSocketBump,
+    LuxCoreSocketColor,
+    LuxCoreSocketFloat
+}
 LuxCoreSocketColor.allowed_inputs = {LuxCoreSocketColor, LuxCoreSocketFloat}
 # Note: Utility nodes like "math" can be used to add bumpmaps together, so we allow Bump input here
-LuxCoreSocketFloat.allowed_inputs = {LuxCoreSocketColor, LuxCoreSocketFloat, LuxCoreSocketBump}
+LuxCoreSocketFloat.allowed_inputs = {
+    LuxCoreSocketColor,
+    LuxCoreSocketFloat,
+    LuxCoreSocketBump
+}
 LuxCoreSocketMapping2D.allowed_inputs = {LuxCoreSocketMapping2D}
 LuxCoreSocketMapping3D.allowed_inputs = {LuxCoreSocketMapping3D}
+LuxCoreSocketProperty.allowed_inputs = {LuxCoreSocketProperty}
