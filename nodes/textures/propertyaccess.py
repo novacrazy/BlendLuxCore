@@ -10,6 +10,7 @@ from . objectselect import LuxCoreNodeTexSelectObject, LuxCoreObjectPointers
 #
 # Possible outputs:
 #   * Color
+#   * Vector
 #   * Value (float)
 #   * Object
 #
@@ -22,6 +23,8 @@ from . objectselect import LuxCoreNodeTexSelectObject, LuxCoreObjectPointers
 # slice and index options will be presented.
 
 BLACKLISTED_PROPERTIES = ["owner", "is_frozen", "order", "is_wrapped"]
+
+SUPPORTS_CUSTOM_PROPS = [bpy.types.ID, bpy.types.Bone, bpy.types.PoseBone]
 
 
 def proper_case_property(p):
@@ -36,16 +39,83 @@ def proper_case_property(p):
 class LuxCoreNodeTexPropertyAccess(LuxCoreNodeTexture):
     bl_label = "Property Access"
 
-    def init(self, context):
-        self.outputs.new("LuxCoreSocketProperty",
-                         "Object", identifier="Object")
-        self.outputs.new("LuxCoreSocketColor", "Color")
-        self.outputs.new("LuxCoreSocketFloatUnbounded", "Value")
+    def get_interpretations(self, context):
+        INDEXED = ("indexed", "Indexed", "")
+        COLOR = ("color", "Color", "")
+        VECTOR_2D = ("vector2d", "Vector 2D", "")
+        VECTOR_3D = ("vector3d", "Vector 3D", "")
 
-        self.outputs["Color"].enabled = False
-        self.outputs["Value"].enabled = False
+        interpretations = [INDEXED]
 
-        self.add_input("LuxCoreSocketProperty", "Object")
+        if self.list_elements >= 3:
+            interpretations.extend([COLOR, VECTOR_3D])
+
+        if self.list_elements >= 2:
+            interpretations.append(VECTOR_2D)
+
+        return interpretations
+
+    def on_select_interpretation(self, context):
+        pass
+
+    interpret_list_as = EnumProperty(
+        name="Interpret List As",
+        items=get_interpretations,
+        update=on_select_interpretation
+    )
+
+    parent_name = StringProperty(name="Parent Name")
+    property_name = StringProperty(name="PropertyName")
+
+    selected_property = StringProperty(name="Selected Property")
+
+    def get_properties(self, context):
+        PASSTHROUGH = [("Passthrough", "Passthrough", "")]
+
+        # Cannot set properties from here, so resolve in read_only mode
+        (_, parent_object, _) = self.resolve(read_only=True)
+
+        # Check if the key is a valid property
+        def valid_key(key):
+            if key.startswith("__") or key in BLACKLISTED_PROPERTIES:
+                return False
+            else:
+                child_object = getattr(parent_object, key)
+
+                if child_object is None:
+                    return False
+                elif callable(child_object) and not isinstance(child_object, Struct):
+                    # Callable functions that would not otherwise have subproperties
+                    # should be avoided
+                    return False
+                elif isinstance(child_object, str):
+                    # Strings are kind of pointless here
+                    return False
+
+            return True
+
+        if parent_object is not None:
+            if any([isinstance(parent_object, ty) for ty in SUPPORTS_CUSTOM_PROPS]):
+                keys = parent_object.keys()
+            else:
+                keys = filter(valid_key, dir(parent_object))
+
+            return list(map(lambda p: (p, proper_case_property(p), ""), keys)) + PASSTHROUGH
+        else:
+            return PASSTHROUGH
+
+    def on_select_property(self, context):
+        self.selected_property = self.properties
+
+        self.property_name = proper_case_property(self.selected_property)
+
+        if "color" in self.selected_property:
+            self.interpret_list_as = "color"
+
+    properties = EnumProperty(
+        name="Properties",
+        items=get_properties,
+        update=on_select_property)
 
     # True is the currently selected property is a list
     selected_is_list = BoolProperty(name="Is List")
@@ -56,52 +126,33 @@ class LuxCoreNodeTexPropertyAccess(LuxCoreNodeTexture):
     # True is the current selected property is valid
     valid_selection = BoolProperty(name="Valid Selection")
 
-    parent_name = StringProperty(name="Parent Name")
-    property_name = StringProperty(name="PropertyName")
-
-    def get_properties(self, context):
-        PASSTHROUGH = [("Passthrough", "Passthrough", "")]
-
-        (_, parent_object, _) = self.resolve(read_only=True)
-
-        def valid_key(key):
-            if key.startswith("__") or key in BLACKLISTED_PROPERTIES:
-                return False
-            else:
-                child_object = getattr(parent_object, key)
-
-                if child_object is None:
-                    return False
-                elif callable(child_object) and not isinstance(child_object, Struct):
-                    return False
-                elif isinstance(child_object, str):
-                    return False
-
-            return True
-
-        if parent_object is not None:
-            valid_dir = filter(valid_key, dir(parent_object))
-
-            return list(map(lambda p: (p, proper_case_property(p), ""), valid_dir)) + PASSTHROUGH
-        else:
-            return PASSTHROUGH
-
-    selected_property = StringProperty(name="Selected Property")
-
-    def on_select_property(self, context):
-        self.selected_property = self.properties
-
-        self.property_name = proper_case_property(self.selected_property)
-
-    properties = EnumProperty(
-        name="Properties",
-        items=get_properties,
-        update=on_select_property)
-
     list_elements = IntProperty(name="List Elements")
-    slice_list = BoolProperty(name="Slice List")
-    slice_first = IntProperty(name="First Index", min=0)
-    slice_last = IntProperty(name="Last Index", min=0)
+
+    real_list_index = IntProperty(name="Real List Index")
+
+    def get_list_index(self):
+        return self.real_list_index
+
+    def set_list_index(self, value):
+        self.real_list_index = max(0, min(value, self.list_elements - 1))
+
+    list_index = IntProperty(
+        name="First Index",
+        min=0,
+        get=get_list_index,
+        set=set_list_index
+    )
+
+    def init(self, context):
+        self.outputs.new("LuxCoreSocketProperty",
+                         "Object", identifier="Object")
+        self.outputs.new("LuxCoreSocketColor", "Color")
+        self.outputs.new("LuxCoreSocketFloatUnbounded", "Value")
+
+        self.outputs["Color"].enabled = False
+        self.outputs["Value"].enabled = False
+
+        self.add_input("LuxCoreSocketProperty", "Object")
 
     def update_sockets(self):
         pass
@@ -149,7 +200,8 @@ class LuxCoreNodeTexPropertyAccess(LuxCoreNodeTexture):
 
                 parent_object = getattr(
                     parent_node.pointers,
-                    parent_node.datablock_type)
+                    parent_node.datablock_type
+                )
 
                 if not read_only:
                     self.parent_name = parent_object.name
@@ -188,11 +240,8 @@ class LuxCoreNodeTexPropertyAccess(LuxCoreNodeTexture):
                             self.list_elements = len(child_object)
 
                         try:
-                            if self.slice_list:
-                                child_object = child_object[self.slice_first:self.slice_last]
-                            else:
-                                child_object = child_object[self.slice_first]
-                        except IndexError:
+                            child_object = child_object[self.list_index]
+                        except:
                             # Invalid slice/index, so there is no child
                             child_object = None
 
@@ -223,15 +272,10 @@ class LuxCoreNodeTexPropertyAccess(LuxCoreNodeTexture):
 
             if self.valid_selection:
                 if self.selected_is_list:
-                    layout.prop(self, "slice_list", text="Slice List?")
+                    layout.prop(self, "interpret_list_as", text="Interpret")
 
-                    if self.slice_list:
-                        row = layout.row()
-
-                        row.prop(self, "slice_first", text="First")
-                        row.prop(self, "slice_last", text="Last")
-                    else:
-                        layout.prop(self, "slice_first", text="Index")
+                    if self.interpret_list_as == "indexed":
+                        layout.prop(self, "list_index", text="Index")
             else:
                 layout.label("Invalid Selection!", icon="CANCEL")
         else:
